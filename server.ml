@@ -1,0 +1,4 @@
+
+type testAB =
+| TestA
+| TestB
