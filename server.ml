@@ -1,4 +1,0 @@
-
-type testAB =
-| TestA
-| TestB

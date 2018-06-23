@@ -1,6 +1,10 @@
-build:
-	coqc server.v
-	ocamlbuild main.native
+build: coq
+	ocamlbuild -I core main.native
+
+.PHONY: coq
+
+coq:
+	$(MAKE) -C core
 
 run: build
 	./main.native
@@ -8,3 +12,4 @@ run: build
 clean:
 	ocamlbuild -clean
 	rm -f *.o *.vo *.glob .*.aux
+	$(MAKE) -C core clean
