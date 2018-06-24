@@ -12,6 +12,10 @@ open Thread
 open Server
 open Packet
 
+(* Port -> Server state *)
+module IntMap = Map.Make(struct type t = int let compare = compare end)
+
+let connections = IntMap.empty
 let maxlen = 1500 (* Ethernet MTU *)
 let port = ref 8069
 
