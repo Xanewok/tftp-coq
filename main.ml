@@ -23,7 +23,7 @@ let implode l =
   let res = Bytes.create (List.length l) in
   let rec imp i = function
   | [] -> res
-  | c :: l -> res.[i] <- c; imp (i + 1) l in
+  | c :: l -> Bytes.set res i c; imp (i + 1) l in
   imp 0 l;;
 
 module ThreadSet = Set.Make(struct type t = Thread.t let compare = compare end)
