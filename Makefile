@@ -1,5 +1,5 @@
 build: coq
-	ocamlbuild -I core main.native
+	ocamlbuild -I core -pkg unix -tag thread main.native
 
 .PHONY: coq
 
