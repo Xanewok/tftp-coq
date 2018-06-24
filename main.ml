@@ -6,11 +6,12 @@
 * Powrócić do początku pętli obsługi połączeń
  *)
 open Unix
-open Printf
 open Thread
+open Printf
 
 open Server
 open Packet
+open Serialize
 
 (* string <-> char list conversion functions *)
 let explode s =
@@ -55,6 +56,7 @@ let rec conn_loop state sock =
         | None -> printf "[error] Couldn't parse: %s\n%!" buffer;
         | Some(packet) ->
             (* TODO: Handle <512 data packets (connection termination) *)
+            (* TODO: Handle timeouts (SO_RCVTIMEO) *)
             match handle_msg None (Some(packet)) with
             | None -> ();
             | Some(state', response) ->

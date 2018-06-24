@@ -56,45 +56,17 @@ Definition errcode_value (err : errcode) : N :=
         | NoSuchUser      => 7
     end.
 
+Local Open Scope N_scope.
+Lemma errcode_limited: forall A : errcode, errcode_value(A) <= 7.
+Proof.
+    intros.
+    destruct A.
+    all: easy.
+Qed.
+
 Inductive packet : Set :=
     | ReadReq        : string -> mode -> packet
     | WriteReq       : string -> mode -> packet
     | Data           : N -> string -> packet
     | Acknowledgment : N -> packet
     | Error          : errcode -> string -> packet.
-
-Local Open Scope char_scope.
-Definition parse_opcode (data : string) : option (opcode * string) :=
-    match data with
-        | EmptyString => None
-        | String zero (String op tail) =>
-            match op with
-                | "001" => Some(RRQ, tail)
-                | "002" => Some(WRQ, tail)
-                | "003" => Some(DATA, tail)
-                | "004" => Some(ACK, tail)
-                | "005" => Some(ERROR, tail)
-                | _ => None
-            end
-        | _ => None
-    end.
-
-Lemma parsed_op_correct_value:
-    forall (op : opcode) (tail : string),
-        parse_opcode (String zero (String
-            (ascii_of_pos (opcode_value (op)))
-            tail
-        )) = Some(op, tail).
-Proof.
-    intros.
-    destruct op.
-    all: simpl; reflexivity.
-Qed.
-
-
-(* TODO *)
-Definition parse_packet (msg : string) : option packet :=
-    None.
-
-(* TODO *)
-Definition string_of_packet (p : packet) : string := EmptyString.
