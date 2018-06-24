@@ -1,4 +1,6 @@
 Require Import ExtrOcamlZInt.
+Require Import ExtrOcamlString.
+Require Import ExtrOcamlBasic.
 
 (* Don't extract _rec(t) definitions *)
 Unset Elimination Schemes.

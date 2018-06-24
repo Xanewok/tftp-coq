@@ -1,4 +1,6 @@
 Require Import ZArith.
+Require Import Coq.Strings.String.
+Require Import Ascii.
 
 Local Open Scope positive_scope.
 
@@ -26,4 +28,32 @@ Proof.
     unfold opcode_value.
     destruct A.
     all: easy.
+Qed.
+
+Local Open Scope char_scope.
+Definition parse_opcode (data : string) : option (opcode * string) :=
+    match data with
+        | EmptyString => None
+        | String zero (String op tail) =>
+            match op with
+                | "001" => Some(RRQ, tail)
+                | "002" => Some(WRQ, tail)
+                | "003" => Some(DATA, tail)
+                | "004" => Some(ACK, tail)
+                | "005" => Some(ERROR, tail)
+                | _ => None
+            end
+        | _ => None
+    end.
+
+Lemma parsed_op_correct_value:
+    forall (op : opcode) (tail : string),
+        parse_opcode (String zero (String
+            (ascii_of_pos (opcode_value (op)))
+            tail
+        )) = Some(op, tail).
+Proof.
+    intros.
+    destruct op.
+    all: simpl; reflexivity.
 Qed.
