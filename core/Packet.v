@@ -90,3 +90,11 @@ Proof.
     destruct op.
     all: simpl; reflexivity.
 Qed.
+
+
+(* TODO *)
+Definition parse_packet (msg : string) : option packet :=
+    None.
+
+(* TODO *)
+Definition string_of_packet (p : packet) : string := EmptyString.

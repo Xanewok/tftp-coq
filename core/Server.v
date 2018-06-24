@@ -29,5 +29,5 @@ Definition server_state : Type := option init_server_state.
 
 (* TODO *)
 Definition handle_msg (state : server_state) (a : option packet)
-: init_server_state * (option packet) :=
-    ((mkState Read 1 None), None).
+: option (init_server_state * (option packet)) :=
+    Some ((mkState Read 1 None), None).
