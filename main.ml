@@ -39,6 +39,19 @@ let speclist = [
     ("-p", Arg.Int (set_port), "Bind server to a given port number");
 ]
 
+let debug_mode_to_string mode =
+    match mode with
+    | Netascii -> "netascii"
+    | Octet -> "octet"
+
+let debug_packet_to_debug packet =
+    match packet with
+        | ReadReq (clist, mode) -> sprintf "RRQ: %s %s" (implode clist) (debug_mode_to_string mode)
+        | WriteReq (clist, mode) -> sprintf "WRQ: %s %s" (implode clist) (debug_mode_to_string mode)
+        | Data (num, clist) -> sprintf "DATA: %d %s" num (implode clist)
+        | Acknowledgment (num) -> sprintf "ACK: %d" num
+        | Error (errcode, clist) -> sprintf "ERROR: %d %s" (errcode_value errcode) (implode clist)
+
 (* val open_socket : int -> Unix.file_descr option *)
 let open_socket timeout port =
     try
@@ -80,6 +93,7 @@ let rec conn_loop state sock =
             match parse_packet(explode(buffer)) with
                 | None -> printf "[error] Couldn't parse: %s\n%!" buffer;
                 | Some(packet) ->
+                    printf "[debug] Received packet: %s\n%!" (debug_packet_to_debug packet);
                     (* TODO: Handle <512 data packets (connection termination) *)
                     match handle_event None (Packet packet) with
                     | None -> ();
@@ -126,6 +140,7 @@ let rec recv_loop sock =
     (match parse_packet(explode(buffer)) with
         | None -> printf "[error] Couldn't parse: %s\n%!" buffer;
         | Some(packet) ->
+            printf "[debug] Received packet: %s\n%!" (debug_packet_to_debug packet);
             (* TODO: Check if the packet is valid RRQ/WRQ *)
             match handle_event None (Packet packet) with
             | None -> ();
