@@ -21,11 +21,9 @@ Definition opcode_value (op : opcode) : positive :=
         | ERROR => 5
     end.
 
-(* Unset Printing Notations. *)
-Lemma opcode_limited : forall A, opcode_value(A) >= 1 /\ opcode_value(A) <= 5.
+Lemma opcode_limited : forall A, opcode_value(A) <= 5.
 Proof.
     intros.
-    unfold opcode_value.
     destruct A.
     all: easy.
 Qed.
@@ -35,14 +33,14 @@ Inductive mode : Set :=
     | Octet    : mode.
 
 Inductive errcode : Set :=
-    | Undefined       (* Not defined, see error message (if any). *)
-    | FileNotFound    (* File not found. *)
-    | AccessViolation (* Access violation. *)
-    | AllocError      (* Disk full or allocation exceeded. *)
-    | IllegalOp       (* Illegal TFTP operation. *)
-    | UnknownTID      (* Unknown transfer ID. *)
-    | AlreadyExists   (* File already exists. *)
-    | NoSuchUser.     (* No such user. *)
+    | Undefined       : errcode  (* Not defined, see error message (if any). *)
+    | FileNotFound    : errcode  (* File not found. *)
+    | AccessViolation : errcode  (* Access violation. *)
+    | AllocError      : errcode  (* Disk full or allocation exceeded. *)
+    | IllegalOp       : errcode  (* Illegal TFTP operation. *)
+    | UnknownTID      : errcode  (* Unknown transfer ID. *)
+    | AlreadyExists   : errcode  (* File already exists. *)
+    | NoSuchUser      : errcode. (* No such user. *)
 
 Definition errcode_value (err : errcode) : N :=
     match err with

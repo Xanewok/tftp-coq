@@ -1,21 +1,24 @@
+Require Import ExtrOcamlNatInt.
+Require Import ExtrOcamlZInt.
+
 Require Import ZArith.
-Require Import NArith.
 Require Import Coq.Strings.String.
 Require Import Ascii.
 
 Require Import Packet.
 
 Local Open Scope char_scope.
+Local Open Scope N_scope.
 Definition parse_opcode (data : string) : option (opcode * string) :=
     match data with
         | EmptyString => None
         | String zero (String op tail) =>
-            match op with
-                | "001" => Some(RRQ, tail)
-                | "002" => Some(WRQ, tail)
-                | "003" => Some(DATA, tail)
-                | "004" => Some(ACK, tail)
-                | "005" => Some(ERROR, tail)
+            match N_of_ascii(op) with
+                | 1 %N => Some(RRQ, tail)
+                | 2 %N => Some(WRQ, tail)
+                | 3 %N => Some(DATA, tail)
+                | 4 %N => Some(ACK, tail)
+                | 5 %N => Some(ERROR, tail)
                 | _ => None
             end
         | _ => None
@@ -36,15 +39,15 @@ Definition parse_errcode (data : string) : option (errcode * string) :=
 match data with
     | EmptyString => None
     | String zero (String op tail) =>
-        match op with
-            | "000" => Some(Undefined, tail)
-            | "001" => Some(FileNotFound, tail)
-            | "002" => Some(AccessViolation, tail)
-            | "003" => Some(AllocError, tail)
-            | "004" => Some(IllegalOp, tail)
-            | "005" => Some(UnknownTID, tail)
-            | "006" => Some(AlreadyExists, tail)
-            | "007" => Some(NoSuchUser, tail)
+        match N_of_ascii(op) with
+            | 0 %N => Some(Undefined, tail)
+            | 1 %N => Some(FileNotFound, tail)
+            | 2 %N => Some(AccessViolation, tail)
+            | 3 %N => Some(AllocError, tail)
+            | 4 %N => Some(IllegalOp, tail)
+            | 5 %N => Some(UnknownTID, tail)
+            | 6 %N => Some(AlreadyExists, tail)
+            | 7 %N => Some(NoSuchUser, tail)
             | _ => None
         end
     | _ => None
@@ -85,44 +88,76 @@ TFTP Formats
 
 (* ! Wykomentowane przez problemy z ekstrakcja *)
 Definition parse_data (data: string) : option packet :=
-    None.
-    (* match data with
+    match data with
     | String c1 (String c2 tail) =>
-        let num := (nat_of_ascii(c1) * 256) + nat_of_ascii(c2) in
+        let num := (N_of_ascii(c1) * 256) + N_of_ascii(c2) in
             (* TODO: Handle mode: netascii replaces newline *)
-            match (length tail) <= 512 with
-            | True => Some(Data (N.of_nat num) tail)
+            match ((length tail) <= 512)%nat with
+            | True => Some(Data num tail)
             end
     | _ => None
-    end. *)
+    end.
 
 Definition parse_error (data : string) : option packet :=
-    None.
-    (* match parse_errcode data with
+    match parse_errcode data with
     | Some(errcode, String c tail) =>
         let len := length (String c tail) in
         match get len (String c tail) with
         (* ErrMsg ends with 0 *)
-        | Some("000") =>
-            let errmsg := substring 0 (len-1) (String c tail) in
+        | Some(val) => match N_of_ascii(val) with
+            | 0 %N => let errmsg := substring 0 (len-1) (String c tail) in
                 Some(Error errcode errmsg)
+            | _ => None
+            end
         | _ => None
         end
     | _ => None
-    end. *)
+    end.
 
 Definition parse_packet (data : string) : option packet :=
-    None.
-    (* match parse_opcode (data) with
+    match parse_opcode (data) with
     | Some(RRQ, tail) => None (* TODO *)
     | Some(WRQ, tail) => None (* TODO *)
     | Some(DATA, tail) => parse_data tail
     | Some(ACK, String c1 (String c2 EmptyString)) =>
-        let num := (nat_of_ascii(c1) * 256) + nat_of_ascii(c2) in
-            Some(Acknowledgment (N.of_nat num))
+        let num := (N_of_ascii(c1) * 256) + N_of_ascii(c2) in
+            Some(Acknowledgment num)
     | Some(ERROR, tail) => parse_error tail
     | _ => None
-    end. *)
+    end.
+
+Theorem data_packet_payload : forall c1 c2 tail num data,
+    parse_packet(
+        String "000" (
+        String (ascii_of_pos (opcode_value DATA)) (
+        String c1 (
+        String c2 tail)))
+    ) = Some(Data num data) -> data = tail /\ num = N_of_ascii(c1) * 256 + N_of_ascii(c2).
+Proof.
+    intros.
+    unfold parse_packet in H.
+    simpl in H.
+    injection H as H1.
+    auto.
+Qed.
 
 (* TODO *)
 Definition string_of_packet (p : packet) : string := EmptyString.
+
+From Coq Require Extraction.
+Extract Inlined Constant Init.Nat.sub => "(-)".
+Extract Inlined Constant N_of_ascii => "Char.code".
+Extract Inlined Constant N.mul => "( * )".
+Extract Inlined Constant N.add => "(+)".
+Extract Inlined Constant String.length => "List.length".
+Extract Inlined Constant String.substring =>
+    "(let rec sublist b e l =
+    match l with
+      |  [] -> []
+      | h :: t ->
+         let tail = if e=0 then [] else sublist (b-1) (e-1) t in
+         if b>0 then tail else h :: tail
+    in sublist)".
+    (* "(fun low high l -> List.filter (fun i _ -> i >= low && pos < high) l)". *)
+Extract Inlined Constant String.get => (* TODO: Coq is 1-based, Ocaml is 0-based *)
+    "(fun x y -> try Some (List.nth y x) with Failure f -> None)".

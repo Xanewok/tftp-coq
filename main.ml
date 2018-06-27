@@ -27,15 +27,12 @@ let implode l =
   | c :: l -> Bytes.set res i c; imp (i + 1) l in
   imp 0 l;;
 
-module ThreadSet = Set.Make(struct type t = Thread.t let compare = compare end)
-
-let connections = ref ThreadSet.empty
 let maxlen = 1500 (* Ethernet MTU *)
 let port = ref 8069
 
 let set_port = function
-| p when (p >= 1 && p <= 65535) -> port := p
-| _ -> raise (Arg.Bad("Port outside of 1..65535 range"))
+| p when (p >= 0 && p <= 65535) -> port := p
+| _ -> raise (Arg.Bad("Port outside of 0..65535 range"))
 
 let speclist = [
     ("-p", Arg.Int (set_port), "Bind server to a given port number");
@@ -57,7 +54,7 @@ let rec conn_loop state sock =
         | Some(packet) ->
             (* TODO: Handle <512 data packets (connection termination) *)
             (* TODO: Handle timeouts (SO_RCVTIMEO) *)
-            match handle_msg None (Some(packet)) with
+            match handle_event None (Packet packet) with
             | None -> ();
             | Some(state', response) ->
                 state := state';
@@ -103,13 +100,12 @@ let rec recv_loop sock =
         | None -> printf "[error] Couldn't parse: %s\n%!" buffer;
         | Some(packet) ->
             (* TODO: Check if the packet is valid RRQ/WRQ *)
-            match handle_msg None (Some(packet)) with
+            match handle_event None (Packet packet) with
             | None -> ();
             | Some(state, response) ->
                 let handle = Thread.create conn_entry
                     (sockaddr, state, packet, response) in
                         printf "[debug] Starting connection thread id:%d\n%!" (Thread.id handle);
-                        connections := ThreadSet.add handle !connections;
     );
 
     recv_loop sock
