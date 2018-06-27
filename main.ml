@@ -27,6 +27,7 @@ let implode l =
   | c :: l -> Bytes.set res i c; imp (i + 1) l in
   imp 0 l;;
 
+let timeout = 5.0 (* TFTP message timeout *)
 let maxlen = 1500 (* Ethernet MTU *)
 let port = ref 69
 
@@ -39,40 +40,57 @@ let speclist = [
 ]
 
 (* val open_socket : int -> Unix.file_descr option *)
-let open_socket port =
+let open_socket timeout port =
     try
         let sock = socket PF_INET SOCK_DGRAM 0 in
+        match timeout with
+            | Some(timeout) -> setsockopt_float sock SO_RCVTIMEO timeout;
+            | None -> ();
+        ;
         setsockopt sock SO_REUSEADDR true;
         bind sock (ADDR_INET (inet_addr_any, port));
         Some sock
     with Unix_error (_, _, _) -> None
 
-let rec conn_loop state sock =
+let receive_packet sock =
     let buffer = Bytes.create maxlen in
-    let buffer, host, port, sockaddr =
-    match recvfrom sock buffer 0 maxlen [] with
-        | len, (ADDR_INET (addr, port) as sockaddr) ->
-            String.sub buffer 0 len,
-            (gethostbyaddr addr).h_name,
-            port,
-            sockaddr
-        | _ -> assert false
-    in
-    (match parse_packet(explode(buffer)) with
-        | None -> printf "[error] Couldn't parse: %s\n%!" buffer;
-        | Some(packet) ->
-            (* TODO: Handle <512 data packets (connection termination) *)
-            (* TODO: Handle timeouts (SO_RCVTIMEO) *)
-            match handle_event None (Packet packet) with
-            | None -> ();
-            | Some(state', response) ->
-                state := state';
-                match response with
-                | None -> ();
-                | Some(response) -> let data = string_of_packet(response) in
-                    ignore
-                    (sendto sock (implode data) (List.length data) 0 [] sockaddr);
-            ();
+    match
+        try Some (Some (recvfrom sock buffer 0 maxlen []))
+        with
+            | Unix_error (EAGAIN, _, _) -> Some(None)
+            | _ -> None
+    with
+        | Some (Some(len, (ADDR_INET (addr, port) as sockaddr))) ->
+            (* buffer, host, port, sockaddr *)
+            Some (Some (
+                String.sub buffer 0 len,
+                (gethostbyaddr addr).h_name,
+                port,
+                sockaddr
+            ))
+        | Some (Some(_, ADDR_UNIX _)) -> assert false
+        | Some None -> Some None
+        | None -> None
+
+let rec conn_loop state sock =
+    (match receive_packet sock with
+        | None -> printf "[error] Error receiving packet from TID: %d\n%!" (Server.port !state)
+        | Some None -> printf "[debug] Packet timed out in TID: %d\n%!" (Server.port !state)
+        | Some Some(buffer, host, port, sockaddr) ->
+            match parse_packet(explode(buffer)) with
+                | None -> printf "[error] Couldn't parse: %s\n%!" buffer;
+                | Some(packet) ->
+                    (* TODO: Handle <512 data packets (connection termination) *)
+                    match handle_event None (Packet packet) with
+                    | None -> ();
+                    | Some(state', response) ->
+                        state := state';
+                        match response with
+                        | None -> ();
+                        | Some(response) -> let data = string_of_packet(response) in
+                            ignore
+                            (sendto sock (implode data) (List.length data) 0 [] sockaddr);
+                    ();
     );
 
     conn_loop state sock
@@ -80,7 +98,7 @@ let rec conn_loop state sock =
 (* Serves as an entry-point for incoming connections - port number is generated
  * that is used for further packets regarding this connection *)
 let conn_entry (sockaddr, init_state, msg, response) =
-    match open_socket 0 with
+    match open_socket (Some timeout) 0 with
         | None -> printf "[error] Couldn't open a socket for a new connection%!";
         | Some(sock) ->
             let port =
@@ -123,7 +141,7 @@ let () =
     Arg.parse speclist print_endline "Simple Coq-certified TFTP Server";
 
     Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-    match open_socket !port with
+    match open_socket None !port with
     | None -> printf "[error] Couldn't start a server on port %d\n%!" !port;
     | Some(sock) ->
         printf "[debug] Entering UDP packet loop (port: %d)...\n%!" !port;
