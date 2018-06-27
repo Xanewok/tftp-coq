@@ -14,9 +14,9 @@ Require Import ZArith.
 Require Import Packet.
 
 Unset Elimination Schemes.
-Inductive mode : Type :=
-    | Read
-    | Write.
+Inductive mode : Set :=
+    | Read  : mode
+    | Write : mode.
 
 Record init_server_state : Type := mkState {
     transfer_mode : mode;

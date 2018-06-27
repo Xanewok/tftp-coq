@@ -5,12 +5,12 @@ Require Import Ascii.
 Local Open Scope positive_scope.
 
 Unset Elimination Schemes. (* Don't generate _rect _ind principles *)
-Inductive opcode: Type :=
-    | RRQ    (* 1 = Read request *)
-    | WRQ    (* 2 = Write request *)
-    | DATA   (* 3 = Data *)
-    | ACK    (* 4 = Acknowledgment *)
-    | ERROR. (* 5 = Error *)
+Inductive opcode : Set :=
+    | RRQ   : opcode   (* 1 = Read request *)
+    | WRQ   : opcode   (* 2 = Write request *)
+    | DATA  : opcode   (* 3 = Data *)
+    | ACK   : opcode   (* 4 = Acknowledgment *)
+    | ERROR : opcode.  (* 5 = Error *)
 
 Definition opcode_value (op : opcode) : positive :=
     match op with
@@ -22,7 +22,7 @@ Definition opcode_value (op : opcode) : positive :=
     end.
 
 (* Unset Printing Notations. *)
-Lemma opcode_limited: forall A, opcode_value(A) >= 1 /\ opcode_value(A) <= 5.
+Lemma opcode_limited : forall A, opcode_value(A) >= 1 /\ opcode_value(A) <= 5.
 Proof.
     intros.
     unfold opcode_value.
@@ -30,11 +30,11 @@ Proof.
     all: easy.
 Qed.
 
-Inductive mode: Type :=
-    | Netascii
-    | Octet.
+Inductive mode : Set :=
+    | Netascii : mode
+    | Octet    : mode.
 
-Inductive errcode: Type :=
+Inductive errcode : Set :=
     | Undefined       (* Not defined, see error message (if any). *)
     | FileNotFound    (* File not found. *)
     | AccessViolation (* Access violation. *)
