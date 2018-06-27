@@ -28,7 +28,7 @@ let implode l =
   imp 0 l;;
 
 let maxlen = 1500 (* Ethernet MTU *)
-let port = ref 8069
+let port = ref 69
 
 let set_port = function
 | p when (p >= 0 && p <= 65535) -> port := p
@@ -37,6 +37,15 @@ let set_port = function
 let speclist = [
     ("-p", Arg.Int (set_port), "Bind server to a given port number");
 ]
+
+(* val open_socket : int -> Unix.file_descr option *)
+let open_socket port =
+    try
+        let sock = socket PF_INET SOCK_DGRAM 0 in
+        setsockopt sock SO_REUSEADDR true;
+        bind sock (ADDR_INET (inet_addr_any, port));
+        Some sock
+    with Unix_error (_, _, _) -> None
 
 let rec conn_loop state sock =
     let buffer = Bytes.create maxlen in
@@ -71,17 +80,17 @@ let rec conn_loop state sock =
 (* Serves as an entry-point for incoming connections - port number is generated
  * that is used for further packets regarding this connection *)
 let conn_entry (sockaddr, init_state, msg, response) =
-    let sock = socket PF_INET SOCK_DGRAM 0 in
-    setsockopt sock SO_REUSEADDR true;
-    bind sock (ADDR_INET (inet_addr_any, 0));
-    let port =
-        match getsockname(sock) with
-            | ADDR_INET (addr, port) -> port
-            | ADDR_UNIX _ -> assert false
-    in
-    printf "[debug] Allocated port %d for new connection\n%!" port;
-    let state = ref init_state in
-    conn_loop state sock
+    match open_socket 0 with
+        | None -> printf "[error] Couldn't open a socket for a new connection%!";
+        | Some(sock) ->
+            let port =
+            match getsockname(sock) with
+                | ADDR_INET (addr, port) -> port
+                | ADDR_UNIX _ -> assert false
+            in
+            printf "[debug] Allocated port %d for new connection\n%!" port;
+            let state = ref init_state in
+            conn_loop state sock
 
 let rec recv_loop sock =
     let buffer = Bytes.create maxlen in
@@ -114,8 +123,8 @@ let () =
     Arg.parse speclist print_endline "Simple Coq-certified TFTP Server";
 
     Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-    let sock = socket PF_INET SOCK_DGRAM 0 in
-    setsockopt sock SO_REUSEADDR true;
-    bind sock (ADDR_INET (inet_addr_any, !port));
-    printf "[debug] Entering UDP packet loop (port: %d)...\n%!" !port;
-    recv_loop sock
+    match open_socket !port with
+    | None -> printf "[error] Couldn't start a server on port %d\n%!" !port;
+    | Some(sock) ->
+        printf "[debug] Entering UDP packet loop (port: %d)...\n%!" !port;
+        recv_loop sock
