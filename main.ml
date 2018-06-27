@@ -86,14 +86,15 @@ let receive_packet sock =
         | None -> None
 
 let rec conn_loop state sock =
+    let port = (!state).port in
     (match receive_packet sock with
-        | None -> printf "[error] Error receiving packet from TID: %d\n%!" (Server.port !state)
-        | Some None -> printf "[debug] Packet timed out in TID: %d\n%!" (Server.port !state)
+        | None -> printf "[error] [%5d] Error receiving packet\n%!" port
+        | Some None -> printf "[debug] [%5d] Packet timed out\n%!" port
         | Some Some(buffer, host, port, sockaddr) ->
             match parse_packet(explode(buffer)) with
-                | None -> printf "[error] Couldn't parse: %s\n%!" buffer;
+                | None -> printf "[error] [%5d] Couldn't parse: %s\n%!" port buffer;
                 | Some(packet) ->
-                    printf "[debug] Received packet: %s\n%!" (debug_packet_to_debug packet);
+                    printf "[debug] [%5d] Received packet: %s\n%!" port (debug_packet_to_debug packet);
                     (* TODO: Handle <512 data packets (connection termination) *)
                     match handle_event None (Packet packet) with
                     | None -> ();
@@ -120,35 +121,27 @@ let conn_entry (sockaddr, init_state, msg, response) =
                 | ADDR_INET (addr, port) -> port
                 | ADDR_UNIX _ -> assert false
             in
-            printf "[debug] Allocated port %d for new connection\n%!" port;
+            printf "[debug] [%5d] Started new connection thread\n%!" port;
             let state = ref init_state in
             conn_loop state sock
 
 let rec recv_loop sock =
-    let buffer = Bytes.create maxlen in
-    let buffer, host, port, sockaddr =
-    match recvfrom sock buffer 0 maxlen [] with
-        | len, (ADDR_INET (addr, port) as sockaddr) ->
-            String.sub buffer 0 len,
-            (gethostbyaddr addr).h_name,
-            port,
-            sockaddr
-        | _ -> assert false
-    in
-    printf "[debug] Cient %s:%d said ``%s''\n%!" host port buffer;
+    match receive_packet sock with
+    | None -> printf "[error] Error receiving packet\n%!"
+    | Some None -> assert false (* No timeout is expected in main loop *)
+    | Some Some(buffer, host, port, sockaddr) ->
+        (printf "[debug] Cient %s:%d said ``%s''\n%!" host port buffer;
 
-    (match parse_packet(explode(buffer)) with
-        | None -> printf "[error] Couldn't parse: %s\n%!" buffer;
-        | Some(packet) ->
-            printf "[debug] Received packet: %s\n%!" (debug_packet_to_debug packet);
-            (* TODO: Check if the packet is valid RRQ/WRQ *)
-            match handle_event None (Packet packet) with
-            | None -> ();
-            | Some(state, response) ->
-                let handle = Thread.create conn_entry
-                    (sockaddr, state, packet, response) in
-                        printf "[debug] Starting connection thread id:%d\n%!" (Thread.id handle);
-    );
+        match parse_packet(explode(buffer)) with
+            | None -> printf "[error] Couldn't parse: %s\n%!" buffer;
+            | Some(packet) ->
+                printf "[debug] Received packet: %s\n%!" (debug_packet_to_debug packet);
+                (* TODO: Check if the packet is valid RRQ/WRQ *)
+                match handle_event None (Packet packet) with
+                | None -> ();
+                | Some(state, response) ->
+                    ignore (Thread.create conn_entry (sockaddr, state, packet, response))
+        );
 
     recv_loop sock
 
