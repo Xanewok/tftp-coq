@@ -67,7 +67,7 @@ Definition request_io (st : state) (ev : event) : option io_action :=
         match ev with
         | Packet (Acknowledgment num) =>
             match transfer_mode st with
-            | Read => Some(ReadAction (filename st) (num + 1) 512)
+            | Read => Some(ReadAction (filename st) (num*512) 512)
             | Write => None (* Invalid *)
             end
         | Packet (Data num buf) =>
@@ -88,11 +88,11 @@ Local Open Scope positive_scope.
 Definition handle_event (st : state) (ev : event) (port : positive) (act : option io_result)
 (* new state, packet, should terminate *)
 : (state * option packet * bool) :=
-    let internal_err := (st, Some (Error Undefined ""), true) in
-    let illop_err := (st, Some (Error IllegalOp ""), true) in
-    let io_err := (st, Some (Error AccessViolation ""), true) in (* IO catch-all error *)
+    let internal_err := (st, Some (Error Undefined "Internal error"), true) in
+    let illop_err := (st, Some (Error IllegalOp "Illegal operation"), true) in
+    let io_err := (st, Some (Error AccessViolation "IO error"), true) in (* IO catch-all error *)
     match act with
-    | Some IOFail => (st, Some (Error AccessViolation ""), true)
+    | Some IOFail => io_err
     | _ =>
     match st with
     | None =>
@@ -118,7 +118,8 @@ Definition handle_event (st : state) (ev : event) (port : positive) (act : optio
         | Packet (Acknowledgment num) =>
             match act with
             | Some (DidRead buf) => let packet' := Some(Data (num + 1) buf) in
-                (st, packet', false)
+                if ((String.length buf) <? 512)%nat then (st, packet', true) (* Transfer finished, terminate *)
+                                                    else (st, packet', false)
             | Some IOFail => io_err
             | _ => internal_err
             end

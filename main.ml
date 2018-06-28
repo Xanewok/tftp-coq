@@ -58,7 +58,7 @@ let bytes_of_16bits vl = [Char.chr (vl lsr 8); Char.chr (vl mod 256)]
 
 let bytes_of_packet packet =
     match packet with
-        | Data (num, msg) -> (bytes_of_opcode DATA) @ msg
+        | Data (num, msg) -> (bytes_of_opcode DATA) @ (bytes_of_16bits num) @ msg
         | Acknowledgment num -> (bytes_of_opcode ACK) @ (bytes_of_16bits num)
         | Error (code, msg) -> (bytes_of_opcode ERROR) @ bytes_of_ercode code @ msg @ [Char.chr 0]
         | _ -> []
@@ -68,21 +68,24 @@ match action with
 | ReadAction (file, offset, count) ->
     printf "[debug] Reading from %s at offset %d with count %d\n%!" (implode file) offset count;
     (try
-        (let buf = Bytes.create 512 in
+        let buf = Bytes.create 512 in
         let fd = openfile (implode file) [O_RDONLY] 0o666 in
-        let bytes_read = Unix.read fd buf offset 512 in
-            (close fd;
-            DidRead (explode (String.sub buf 0 bytes_read)))
-        )
+        match Unix.lseek fd offset SEEK_SET with
+        | off when off >= 0 ->
+            let bytes_read = Unix.read fd buf 0 512 in
+                close fd;
+                DidRead (explode (String.sub buf 0 bytes_read))
+        | _ -> raise (Failure "Unix.lseek")
     with Unix_error(_,_,_) | Failure _ -> IOFail)
 | WriteAction (file, offset, count, buf) ->
     printf "[debug] Writing to %s at offset %d with count %d (%s)\n%!" (implode file) offset count (implode buf);
     (try
         let fd = openfile (implode file) [O_RDWR; O_TRUNC; O_CREAT] 0o666 in
         match Unix.lseek fd offset SEEK_SET with
-        | 0 -> let _ = Unix.single_write fd (implode buf) 0 (List.length buf) in (* offset panicks? *)
-            (close fd;
-            DidWrite)
+        | off when off >= 0 -> let _ =
+            Unix.write fd (implode buf) 0 (List.length buf) in (* offset panicks, use Unix.lseek *)
+                (close fd;
+                DidWrite)
         | _ -> raise (Failure "Unix.lseek")
     with Unix_error(_,_,_) | Failure _ -> IOFail)
 
