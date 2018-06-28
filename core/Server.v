@@ -21,6 +21,7 @@ Inductive mode : Set :=
 
 Record init_state : Set := mkState {
     transfer_mode : mode;
+    filename : string;
     port: positive;
     last_packet : option packet;
     timeout_count : N;
@@ -38,38 +39,67 @@ Inductive event : Set :=
     | Packet  : packet -> event.
 
 (* TODO *)
+(* Action (filename offset byte_count [buf]) *)
 Inductive io_action : Set :=
-    | ReadAction  : string -> N -> io_action
-    | WriteAction : string -> N -> string -> io_action.
+    | ReadAction  : string -> N -> N -> io_action
+    | WriteAction : string -> N -> N -> string -> io_action.
+
+Inductive io_result : Set :=
+    | DidRead : string -> io_result
+    | DidWrite : io_result
+    | IOFail.
 
 Definition incr_timeout (st : init_state) : init_state :=
     mkState
-    (transfer_mode st) (port st) (last_packet st) ((timeout_count st) + 1).
+    (transfer_mode st) (filename st) (port st) (last_packet st) ((timeout_count st) + 1).
 
 (* TODO *)
 Local Open Scope string_scope.
 Local Open Scope positive_scope.
-Definition handle_event (st : state) (ev : event) (port : positive)
-(* new state, packet, requested io_action, should terminate *)
-: (state * option packet * option io_action * bool) :=
+Definition request_io (st : state) (ev : event) : option io_action :=
     match st with
     | None =>
         match ev with
-        | Timeout count => (None, Some (Error Undefined ""), None, false) (* Can't timeout on uninitialized *)
+        | Packet (ReadReq file _) => Some(ReadAction file 0 512)
+        | _ => None
+        end
+    | Some st =>
+        match ev with
+        | Packet (Acknowledgment num) =>
+            match transfer_mode st with
+            | Read => Some(ReadAction (filename st) (num + 1) 512)
+            | Write => None (* Invalid *)
+            end
+        | Packet (Data num buf) =>
+            match transfer_mode st with
+            | Write => Some(WriteAction (filename st) (num + 1) 512 buf)
+            | Read => None (* Invalid *)
+            end
+        | _ => None
+        end
+    end.
+
+Definition handle_event (st : state) (ev : event) (port : positive) (act : option io_result)
+(* new state, packet, requested io_action, should terminate *)
+: (state * option packet * bool) :=
+    match st with
+    | None =>
+        match ev with
+        | Timeout count => (None, Some (Error Undefined ""), false) (* Can't timeout on uninitialized *)
         | Packet (ReadReq file mode) =>
-            ((Some (mkState Read port None 0)), Some (Acknowledgment 0), None, false)
+            ((Some (mkState Read file port None 0)), Some (Acknowledgment 0), false)
         | Packet (WriteReq file mode) =>
-            ((Some (mkState Write port None 0)), Some (Acknowledgment 0), None, false)
-        | _ => (None, Some (Error IllegalOp ""), None, true) (* Only RRQ/WRQ can be initial messages *)
+            ((Some (mkState Write file port None 0)), Some (Acknowledgment 0), false)
+        | _ => (None, Some (Error IllegalOp ""), true) (* Only RRQ/WRQ can be initial messages *)
         end
     | Some st =>
         match ev with
         | Timeout count =>
             match max_timeout_count <=? count with
-            | true => (None, Some (Error Undefined "Timed out"), None, true)
-            | false => (Some (incr_timeout st), None, None, false)
+            | true => (None, Some (Error Undefined "Timed out"), true)
+            | false => (Some (incr_timeout st), None, false)
             end
-        | _ => (None, Some (Error IllegalOp ""), None, true) (* TODO *)
+        | _ => (None, Some (Error IllegalOp ""), true) (* TODO *)
         end
     end.
 
