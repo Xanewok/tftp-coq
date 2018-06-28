@@ -122,13 +122,13 @@ let receive_packet sock =
         | Some None -> Some None
         | None -> None
 
-let state_port state =
-match (!state) with
-| Some st -> st.port
-| None -> -1
+let tid_of_sock sock =
+match getsockname sock with
+| ADDR_UNIX _ -> assert false
+| ADDR_INET (_, port) -> port
 
 let conn_handle_packet state sock sockaddr packet =
-    printf "[debug] [%5d] Received packet: %s\n%!" (state_port state) (debug_packet_to_string packet);
+    printf "[debug] [%5d] Received packet: %s\n%!" (tid_of_sock sock) (debug_packet_to_string packet);
 
     let io_result =
         let io_action = request_io !state (Packet packet) in
@@ -136,10 +136,9 @@ let conn_handle_packet state sock sockaddr packet =
         | Some action -> Some (do_coq_io action)
         | None -> None
     in
-    (* TODO: Handle <512 data packets (connection termination) *)
-    match handle_event !state (Packet packet) !port io_result with
+    match handle_event !state (Packet packet) (tid_of_sock sock) io_result with
     | ((_, Some resp), terminate) when (Packet.is_error resp) ->
-        printf "[debug] [%5d] Protocol error - responding with %s\n%!" (state_port state) (debug_packet_to_string resp);
+        printf "[debug] [%5d] Protocol error - responding with %s\n%!" (tid_of_sock sock) (debug_packet_to_string resp);
         let resp = bytes_of_packet resp in
         ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
         if terminate then Thread.exit ()
@@ -155,11 +154,11 @@ let conn_handle_packet state sock sockaddr packet =
 
 let rec conn_loop state sock =
     (match receive_packet sock with
-        | None -> printf "[error] [%5d] Error receiving packet\n%!" (state_port state)
-        | Some None -> printf "[debug] [%5d] Packet timed out\n%!" (state_port state)
+        | None -> printf "[error] [%5d] Error receiving packet\n%!" (tid_of_sock sock)
+        | Some None -> printf "[debug] [%5d] Packet timed out\n%!" (tid_of_sock sock)
         | Some Some(buffer, host, port, sockaddr) ->
             match parse_packet(explode(buffer)) with
-                | None -> printf "[error] [%5d] Couldn't parse: %s\n%!" (state_port state) buffer;
+                | None -> printf "[error] [%5d] Couldn't parse: %s\n%!" (tid_of_sock sock) buffer;
                 | Some(packet) -> conn_handle_packet state sock sockaddr packet;
     );
     conn_loop state sock
@@ -171,7 +170,7 @@ let conn_entry (sockaddr, packet) =
         | None -> printf "[error] Couldn't open a socket for a new connection%!";
         | Some(sock) ->
             let state = ref None in
-            printf "[debug] [%5d] Started new connection thread\n%!" (state_port state);
+            printf "[debug] [%5d] Started new connection thread\n%!" (tid_of_sock sock);
             conn_handle_packet state sock sockaddr packet;
             conn_loop state sock
 
