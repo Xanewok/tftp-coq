@@ -64,10 +64,9 @@ let bytes_of_packet packet =
         | _ -> []
 
 let do_coq_io action =
-printf "Doing IO";
 match action with
 | ReadAction (file, offset, count) ->
-    printf "Reading from %s at offset %d with count %d\n%!" (implode file) offset count;
+    printf "[debug] Reading from %s at offset %d with count %d\n%!" (implode file) offset count;
     (try
         let buf = Bytes.create 512 in
         let fd = openfile (implode file) [O_RDONLY] 0o666 in
@@ -76,10 +75,10 @@ match action with
             DidRead (explode (String.sub buf 0 bytes_read)))
     with Failure _ -> IOFail)
 | WriteAction (file, offset, count, buf) ->
-    printf "Writing to %s at offset %d with count %d (%s)\n%!" (implode file) offset count (implode buf);
+    printf "[debug] Writing to %s at offset %d with count %d (%s)\n%!" (implode file) offset count (implode buf);
     (try
-        let fd = openfile (implode file) [O_WRONLY; O_TRUNC; O_CREAT] 0o666 in
-        let _ = Unix.write fd (implode buf) offset 512 in
+        let fd = openfile (implode file) [O_RDWR; O_TRUNC; O_CREAT] 0o666 in
+        let _ = Unix.write fd (implode buf) offset (List.length buf) in
             (close fd;
             DidWrite)
     with Failure _ -> IOFail)
@@ -117,50 +116,56 @@ let receive_packet sock =
         | Some None -> Some None
         | None -> None
 
+let state_port state =
+match (!state) with
+| Some st -> st.port
+| None -> -1
+
+let conn_handle_packet state sock sockaddr packet =
+    printf "[debug] [%5d] Received packet: %s\n%!" (state_port state) (debug_packet_to_string packet);
+
+    let io_result =
+        let io_action = request_io !state (Packet packet) in
+        match io_action with
+        | Some action -> Some (do_coq_io action)
+        | None -> None
+    in
+    (* TODO: Handle <512 data packets (connection termination) *)
+    match handle_event !state (Packet packet) !port io_result with
+    | ((_, Some resp), true) -> (* Fatal - respond and forget *)
+        printf "[debug] [%5d] Protocol error - responding with %s\n%!" (state_port state) (debug_packet_to_string resp);
+        let resp = bytes_of_packet resp in
+        ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
+        Thread.exit ();
+    | ((_, Some resp), false) when (Packet.is_error resp) -> (* Non-fatal error *)
+        let resp = bytes_of_packet resp in
+        ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
+    | ((state', Some resp), false) ->
+        let resp = bytes_of_packet resp in
+        ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
+        state := state';
+    | _ -> () (* TODO *)
+
 let rec conn_loop state sock =
-    let myport = (!state).port in
     (match receive_packet sock with
-        | None -> printf "[error] [%5d] Error receiving packet\n%!" myport
-        | Some None -> printf "[debug] [%5d] Packet timed out\n%!" myport
+        | None -> printf "[error] [%5d] Error receiving packet\n%!" (state_port state)
+        | Some None -> printf "[debug] [%5d] Packet timed out\n%!" (state_port state)
         | Some Some(buffer, host, port, sockaddr) ->
             match parse_packet(explode(buffer)) with
-                | None -> printf "[error] [%5d] Couldn't parse: %s\n%!" myport buffer;
-                | Some(packet) ->
-                    printf "[debug] [%5d] Received packet: %s\n%!" myport (debug_packet_to_string packet);
-
-                    let io_result =
-                        let io_action = request_io (Some !state) (Packet packet) in
-                        match io_action with
-                        | Some action -> Some (do_coq_io action)
-                        | None -> None
-                    in
-                    (* TODO: Handle <512 data packets (connection termination) *)
-                    match handle_event (Some !state) (Packet packet) port io_result with
-                    | ((_, Some resp), true) -> (* Fatal - respond and forget *)
-                        printf "[debug] [%5d] Protocol error - responding with %s\n%!" myport (debug_packet_to_string resp);
-                        let resp = bytes_of_packet resp in
-                        ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
-                        Thread.exit ();
-                    | ((_, Some resp), false) when (Packet.is_error resp) -> (* Non-fatal error *)
-                        let resp = bytes_of_packet resp in
-                        ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
-                    | ((Some state', Some resp), false) ->
-                        let resp = bytes_of_packet resp in
-                        ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
-                        state := state';
-                    | _ -> (); (* TODO *)
+                | None -> printf "[error] [%5d] Couldn't parse: %s\n%!" (state_port state) buffer;
+                | Some(packet) -> conn_handle_packet state sock sockaddr packet;
     );
-
     conn_loop state sock
 
 (* Serves as an entry-point for incoming connections - port number is generated
  * that is used for further packets regarding this connection *)
-let conn_entry (sockaddr, init_state) =
+let conn_entry (sockaddr, packet) =
     match open_socket (Some timeout) 0 with
         | None -> printf "[error] Couldn't open a socket for a new connection%!";
         | Some(sock) ->
-            let state = ref init_state in
-            printf "[debug] [%5d] Started new connection thread\n%!" (!state).port;
+            let state = ref None in
+            printf "[debug] [%5d] Started new connection thread\n%!" (state_port state);
+            conn_handle_packet state sock sockaddr packet;
             conn_loop state sock
 
 let rec recv_loop sock =
@@ -174,17 +179,7 @@ let rec recv_loop sock =
             | None -> printf "[error] Couldn't parse: %s\n%!" buffer;
             | Some(packet) ->
                 printf "[debug] Received packet: %s\n%!" (debug_packet_to_string packet);
-                (* TODO *)
-                match handle_event None (Packet packet) port None with
-                | ((_, Some resp), true) -> (* Error - respond and forget *)
-                    printf "[debug] Protocol error - responding with %s\n%!" (debug_packet_to_string resp);
-                    let resp = bytes_of_packet resp in
-                    ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
-                | ((Some state', Some resp), false) -> (* No action should be done when initializing *)
-                    let resp = bytes_of_packet resp in
-                    ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
-                    ignore (Thread.create conn_entry (sockaddr, state'))
-                | _ -> assert false
+                ignore (Thread.create conn_entry (sockaddr, packet))
         );
 
     recv_loop sock

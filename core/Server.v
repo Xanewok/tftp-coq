@@ -55,7 +55,7 @@ Definition incr_timeout (st : init_state) : init_state :=
 
 (* TODO *)
 Local Open Scope string_scope.
-Local Open Scope positive_scope.
+Local Open Scope N_scope.
 Definition request_io (st : state) (ev : event) : option io_action :=
     match st with
     | None =>
@@ -71,16 +71,22 @@ Definition request_io (st : state) (ev : event) : option io_action :=
             | Write => None (* Invalid *)
             end
         | Packet (Data num buf) =>
-            match transfer_mode st with
-            | Write => Some(WriteAction (filename st) (num + 1) 512 buf)
-            | Read => None (* Invalid *)
+            match 1 <=? num with
+            | true =>
+                match transfer_mode st with
+                | Write => Some(WriteAction (filename st) (num - 1) 512 buf)
+                | Read => None (* Invalid *)
+                end
+            | false => None (* Invalid *)
             end
         | _ => None
         end
     end.
 
+Local Close Scope N_scope.
+Local Open Scope positive_scope.
 Definition handle_event (st : state) (ev : event) (port : positive) (act : option io_result)
-(* new state, packet, requested io_action, should terminate *)
+(* new state, packet, should terminate *)
 : (state * option packet * bool) :=
     match st with
     | None =>
@@ -105,3 +111,5 @@ Definition handle_event (st : state) (ev : event) (port : positive) (act : optio
 
 From Coq Require Extraction.
 Extract Inlined Constant Pos.leb => "(<=)".
+Extract Inlined Constant N.leb => "(<=)".
+Extract Inlined Constant N.sub => "(-)".
