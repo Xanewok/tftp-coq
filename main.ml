@@ -68,20 +68,23 @@ match action with
 | ReadAction (file, offset, count) ->
     printf "[debug] Reading from %s at offset %d with count %d\n%!" (implode file) offset count;
     (try
-        let buf = Bytes.create 512 in
+        (let buf = Bytes.create 512 in
         let fd = openfile (implode file) [O_RDONLY] 0o666 in
         let bytes_read = Unix.read fd buf offset 512 in
             (close fd;
             DidRead (explode (String.sub buf 0 bytes_read)))
-    with Failure _ -> IOFail)
+        )
+    with Unix_error(_,_,_) | Failure _ -> IOFail)
 | WriteAction (file, offset, count, buf) ->
     printf "[debug] Writing to %s at offset %d with count %d (%s)\n%!" (implode file) offset count (implode buf);
     (try
         let fd = openfile (implode file) [O_RDWR; O_TRUNC; O_CREAT] 0o666 in
-        let _ = Unix.write fd (implode buf) offset (List.length buf) in
+        match Unix.lseek fd offset SEEK_SET with
+        | 0 -> let _ = Unix.single_write fd (implode buf) 0 (List.length buf) in (* offset panicks? *)
             (close fd;
             DidWrite)
-    with Failure _ -> IOFail)
+        | _ -> raise (Failure "Unix.lseek")
+    with Unix_error(_,_,_) | Failure _ -> IOFail)
 
 (* val open_socket : int -> Unix.file_descr option *)
 let open_socket timeout port =
@@ -132,19 +135,20 @@ let conn_handle_packet state sock sockaddr packet =
     in
     (* TODO: Handle <512 data packets (connection termination) *)
     match handle_event !state (Packet packet) !port io_result with
-    | ((_, Some resp), true) -> (* Fatal - respond and forget *)
+    | ((_, Some resp), terminate) when (Packet.is_error resp) ->
         printf "[debug] [%5d] Protocol error - responding with %s\n%!" (state_port state) (debug_packet_to_string resp);
         let resp = bytes_of_packet resp in
         ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
-        Thread.exit ();
-    | ((_, Some resp), false) when (Packet.is_error resp) -> (* Non-fatal error *)
-        let resp = bytes_of_packet resp in
-        ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
-    | ((state', Some resp), false) ->
-        let resp = bytes_of_packet resp in
-        ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr);
+        if terminate then Thread.exit ()
+    | ((state', resp), terminate) ->
+        (match resp with
+        | None -> ()
+        | Some resp -> let resp = bytes_of_packet resp in
+            ignore (sendto sock (implode resp) 0 (List.length resp) [] sockaddr)
+        );
+
         state := state';
-    | _ -> () (* TODO *)
+        if terminate then Thread.exit ()
 
 let rec conn_loop state sock =
     (match receive_packet sock with

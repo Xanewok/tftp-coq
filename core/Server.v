@@ -74,7 +74,7 @@ Definition request_io (st : state) (ev : event) : option io_action :=
             match 1 <=? num with
             | true =>
                 match transfer_mode st with
-                | Write => Some(WriteAction (filename st) (num - 1) 512 buf)
+                | Write => Some(WriteAction (filename st) ((num - 1)*512) 512 buf)
                 | Read => None (* Invalid *)
                 end
             | false => None (* Invalid *)
@@ -88,28 +88,58 @@ Local Open Scope positive_scope.
 Definition handle_event (st : state) (ev : event) (port : positive) (act : option io_result)
 (* new state, packet, should terminate *)
 : (state * option packet * bool) :=
+    let internal_err := (st, Some (Error Undefined ""), true) in
+    let illop_err := (st, Some (Error IllegalOp ""), true) in
+    let io_err := (st, Some (Error AccessViolation ""), true) in (* IO catch-all error *)
+    match act with
+    | Some IOFail => (st, Some (Error AccessViolation ""), true)
+    | _ =>
     match st with
     | None =>
         match ev with
-        | Timeout count => (None, Some (Error Undefined ""), false) (* Can't timeout on uninitialized *)
+        | Timeout count => internal_err (* Can't timeout on uninitialized *)
         | Packet (ReadReq file mode) =>
-            ((Some (mkState Read file port None 0)), Some (Acknowledgment 0), false)
-        | Packet (WriteReq file mode) =>
-            ((Some (mkState Write file port None 0)), Some (Acknowledgment 0), false)
-        | _ => (None, Some (Error IllegalOp ""), true) (* Only RRQ/WRQ can be initial messages *)
+            match act with
+            | Some (DidRead buf) => let packet' := Some(Data 1 buf) in
+                ((Some (mkState Read file port packet' 0)), packet', false)
+            | _ => illop_err
+            end
+        | Packet (WriteReq file mode) => let packet' := Some(Acknowledgment 0) in
+            ((Some (mkState Write file port packet' 0)), packet', false)
+        | _ => illop_err (* Only RRQ/WRQ can be initial messages *)
         end
-    | Some st =>
+    | Some st' =>
         match ev with
         | Timeout count =>
             match max_timeout_count <=? count with
             | true => (None, Some (Error Undefined "Timed out"), true)
-            | false => (Some (incr_timeout st), None, false)
+            | false => (Some (incr_timeout st'), (last_packet st'), false)
             end
-        | _ => (None, Some (Error IllegalOp ""), true) (* TODO *)
+        | Packet (Acknowledgment num) =>
+            match act with
+            | Some (DidRead buf) => let packet' := Some(Data (num + 1) buf) in
+                (st, packet', false)
+            | Some IOFail => io_err
+            | _ => internal_err
+            end
+        | Packet (Data num buf) =>
+            if ((String.length buf) <? 512)%nat
+            then
+                (st, Some(Acknowledgment num), true) (* Transfer finished, terminate *)
+            else
+                match act with
+                | Some DidWrite => let packet' := Some(Acknowledgment num) in
+                    (st, packet', false)
+                | Some IOFail => io_err
+                | _ => internal_err
+                end
+        | _ => illop_err
         end
+    end
     end.
 
 From Coq Require Extraction.
 Extract Inlined Constant Pos.leb => "(<=)".
+Extract Inlined Constant Nat.ltb => "(<)".
 Extract Inlined Constant N.leb => "(<=)".
 Extract Inlined Constant N.sub => "(-)".
