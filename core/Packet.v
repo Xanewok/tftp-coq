@@ -68,3 +68,9 @@ Inductive packet : Set :=
     | Data           : N -> string -> packet
     | Acknowledgment : N -> packet
     | Error          : errcode -> string -> packet.
+
+Definition is_error (p : packet) : bool :=
+    match p with
+    | Error _ _ => true
+    | _ => false
+    end.

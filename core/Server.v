@@ -23,6 +23,7 @@ Record init_state : Set := mkState {
     transfer_mode : mode;
     port: positive;
     last_packet : option packet;
+    timeout_count : N;
 }.
 
 (* None is standby state - waiting for read/write requests *)
@@ -38,10 +39,39 @@ Inductive event : Set :=
 
 (* TODO *)
 Inductive io_action : Set :=
-    | ReadAction  : string -> io_action
-    | WriteAction : string -> io_action.
+    | ReadAction  : string -> N -> io_action
+    | WriteAction : string -> N -> string -> io_action.
+
+Definition incr_timeout (st : init_state) : init_state :=
+    mkState
+    (transfer_mode st) (port st) (last_packet st) ((timeout_count st) + 1).
 
 (* TODO *)
-Definition handle_event (state : state) (ev : event)
-: option (init_state * (option packet)) :=
-    Some ((mkState Read 1 None), None).
+Local Open Scope string_scope.
+Local Open Scope positive_scope.
+Definition handle_event (st : state) (ev : event) (port : positive)
+(* new state, packet, requested io_action, should terminate *)
+: (state * option packet * option io_action * bool) :=
+    match st with
+    | None =>
+        match ev with
+        | Timeout count => (None, Some (Error Undefined ""), None, false) (* Can't timeout on uninitialized *)
+        | Packet (ReadReq file mode) =>
+            ((Some (mkState Read port None 0)), Some (Acknowledgment 0), None, false)
+        | Packet (WriteReq file mode) =>
+            ((Some (mkState Write port None 0)), Some (Acknowledgment 0), None, false)
+        | _ => (None, Some (Error IllegalOp ""), None, true) (* Only RRQ/WRQ can be initial messages *)
+        end
+    | Some st =>
+        match ev with
+        | Timeout count =>
+            match max_timeout_count <=? count with
+            | true => (None, Some (Error Undefined "Timed out"), None, true)
+            | false => (Some (incr_timeout st), None, None, false)
+            end
+        | _ => (None, Some (Error IllegalOp ""), None, true) (* TODO *)
+        end
+    end.
+
+From Coq Require Extraction.
+Extract Inlined Constant Pos.leb => "(<=)".

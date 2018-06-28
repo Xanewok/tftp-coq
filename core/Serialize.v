@@ -180,9 +180,6 @@ Proof.
     auto.
 Qed.
 
-(* TODO *)
-Definition string_of_packet (p : packet) : string := EmptyString.
-
 From Coq Require Extraction.
 Extract Inlined Constant Init.Nat.sub => "(-)".
 Extract Inlined Constant N_of_ascii => "Char.code".
